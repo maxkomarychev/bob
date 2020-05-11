@@ -8,7 +8,7 @@ import { platform } from 'os';
 import { Input } from '../types';
 
 type Options = Input & {
-  options?: { project?: string };
+  options?: { project?: string; tsc?: string };
 };
 
 export default async function build({
@@ -78,22 +78,22 @@ export default async function build({
       );
     }
 
-    let tsc =
-      path.join(root, 'node_modules', '.bin', 'tsc') +
-      (platform() === 'win32' ? '.cmd' : '');
+    let tsc = options?.tsc
+      ? path.resolve(root, options.tsc)
+      : path.resolve(root, 'node_modules', '.bin', 'tsc') +
+        (platform() === 'win32' ? '.cmd' : '');
 
     if (!(await fs.pathExists(tsc))) {
-      tsc = spawn
-        .sync('which', ['tsc'])
-        .stdout.toString()
-        .trim();
+      tsc = spawn.sync('which', ['tsc']).stdout.toString().trim();
 
       report.warn(
         `Using a global version of ${chalk.blue(
           'tsc'
         )}. Consider adding ${chalk.blue('typescript')} to your ${chalk.blue(
           'devDependencies'
-        )} instead.`
+        )} or specifying the ${chalk.blue(
+          'tsc'
+        )} option for the typescript target.`
       );
     }
 
@@ -127,7 +127,9 @@ export default async function build({
           'node_modules'
         )} or present in $PATH. Make sure you have added ${chalk.blue(
           'typescript'
-        )} to your ${chalk.blue('devDependencies')}.`
+        )} to your ${chalk.blue('devDependencies')} or specify the ${chalk.blue(
+          'tsc'
+        )} option for typescript.`
       );
     }
   } catch (e) {

@@ -10,8 +10,63 @@ import validateNpmPackage from 'validate-npm-package-name';
 import githubUsername from 'github-username';
 import pack from '../package.json';
 
-const TEMPLATE = path.resolve(__dirname, '../templates/library');
 const BINARIES = /(gradlew|\.(jar|keystore|png|jpg|gif))$/;
+
+const COMMON_FILES = path.resolve(__dirname, '../templates/common');
+const NATIVE_FILES = path.resolve(__dirname, '../templates/native-library');
+const EXPO_FILES = path.resolve(__dirname, '../templates/expo-library');
+const CPP_FILES = path.resolve(__dirname, '../templates/cpp-library');
+const OBJC_FILES = path.resolve(__dirname, '../templates/objc-library');
+
+type ArgName =
+  | 'slug'
+  | 'description'
+  | 'author-name'
+  | 'author-email'
+  | 'author-url'
+  | 'repo-url'
+  | 'type';
+
+type Answers = {
+  slug: string;
+  description: string;
+  authorName: string;
+  authorEmail: string;
+  authorUrl: string;
+  repoUrl: string;
+  type: 'native' | 'cpp' | 'expo';
+};
+
+export const args: Record<ArgName, yargs.Options> = {
+  'slug': {
+    description: 'Name of the npm package',
+    type: 'string',
+  },
+  'description': {
+    description: 'Description of the npm package',
+    type: 'string',
+  },
+  'author-name': {
+    description: 'Name of the package author',
+    type: 'string',
+  },
+  'author-email': {
+    description: 'Email address of the package author',
+    type: 'string',
+  },
+  'author-url': {
+    description: 'URL for the package author',
+    type: 'string',
+  },
+  'repo-url': {
+    description: 'URL for the repository',
+    type: 'string',
+  },
+  'type': {
+    description: 'Type package do you want to develop',
+    choices: ['native', 'cpp', 'expo'],
+  },
+};
 
 export default async function create(argv: yargs.Arguments<any>) {
   const folder = path.join(process.cwd(), argv.name);
@@ -44,51 +99,39 @@ export default async function create(argv: yargs.Arguments<any>) {
 
   const basename = path.basename(argv.name);
 
-  const {
-    slug,
-    description,
-    authorName,
-    authorEmail,
-    authorUrl,
-    githubUrl: repo,
-  } = (await inquirer.prompt([
-    {
+  const questions: Record<ArgName, inquirer.Question> = {
+    'slug': {
       type: 'input',
-      name: 'slug',
       message: 'What is the name of the npm package?',
       default: validateNpmPackage(basename).validForNewPackages
         ? /^(@|react-native)/.test(basename)
           ? basename
           : `react-native-${basename}`
         : undefined,
-      validate: input =>
+      validate: (input) =>
         validateNpmPackage(input).validForNewPackages ||
         'Must be a valid npm package name',
     },
-    {
+    'description': {
       type: 'input',
-      name: 'description',
       message: 'What is the description for the package?',
-      validate: input => Boolean(input),
+      validate: (input) => Boolean(input),
     },
-    {
+    'author-name': {
       type: 'input',
-      name: 'authorName',
       message: 'What is the name of package author?',
       default: name,
-      validate: input => Boolean(input),
+      validate: (input) => Boolean(input),
     },
-    {
+    'author-email': {
       type: 'input',
-      name: 'authorEmail',
       message: 'What is the email address for the package author?',
       default: email,
-      validate: input =>
+      validate: (input) =>
         /^\S+@\S+$/.test(input) || 'Must be a valid email address',
     },
-    {
+    'author-url': {
       type: 'input',
-      name: 'authorUrl',
       message: 'What is the URL for the package author?',
       default: async (answers: any) => {
         try {
@@ -101,11 +144,10 @@ export default async function create(argv: yargs.Arguments<any>) {
 
         return undefined;
       },
-      validate: input => /^https?:\/\//.test(input) || 'Must be a valid URL',
+      validate: (input) => /^https?:\/\//.test(input) || 'Must be a valid URL',
     },
-    {
+    'repo-url': {
       type: 'input',
-      name: 'githubUrl',
       message: 'What is the URL for the repository?',
       default: (answers: any) => {
         if (/^https?:\/\/github.com\/[^/]+/.test(answers.authorUrl)) {
@@ -116,16 +158,49 @@ export default async function create(argv: yargs.Arguments<any>) {
 
         return undefined;
       },
-      validate: input => /^https?:\/\//.test(input) || 'Must be a valid URL',
+      validate: (input) => /^https?:\/\//.test(input) || 'Must be a valid URL',
     },
-  ])) as {
-    slug: string;
-    description: string;
-    authorName: string;
-    authorEmail: string;
-    authorUrl: string;
-    githubUrl: string;
+    'type': {
+      type: 'list',
+      message: 'What type of package do you want to develop?',
+      // @ts-ignore - seems types are wrong for inquirer
+      choices: [
+        { name: 'Native module in Kotlin and Objective-C', value: 'native' },
+        { name: 'Native module with C++ code', value: 'cpp' },
+        {
+          name: 'JavaScript module with Web support using Expo',
+          value: 'expo',
+        },
+      ],
+      default: 'native',
+    },
   };
+
+  const {
+    slug,
+    description,
+    authorName,
+    authorEmail,
+    authorUrl,
+    repoUrl,
+    type,
+  } = {
+    ...argv,
+    ...(await inquirer.prompt(
+      Object.entries(questions).map(([key, value]) => ({
+        ...value,
+        name: key.replace(/\b-([a-z])/g, (_, char) => char.toUpperCase()),
+        when: !(argv[key] && value.validate
+          ? value.validate(argv[key]) === true
+          : Boolean(argv[key])),
+        default:
+          typeof value.default === 'function'
+            ? (answers: Partial<Answers>) =>
+                value.default({ ...argv, ...answers })
+            : value.default,
+      }))
+    )),
+  } as Answers;
 
   const project = slug.replace(/^(react-native-|@[^/]+\/)/, '');
 
@@ -143,13 +218,15 @@ export default async function create(argv: yargs.Arguments<any>) {
         .slice(1)}`,
       package: slug.replace(/[^a-z0-9]/g, '').toLowerCase(),
       podspec: slug.replace(/[^a-z0-9]+/g, '-').replace(/^-/, ''),
+      native: type === 'native' || type === 'cpp',
+      cpp: type === 'cpp',
     },
     author: {
       name: authorName,
       email: authorEmail,
       url: authorUrl,
     },
-    repo,
+    repo: repoUrl,
   };
 
   const copyDir = async (source: string, dest: string) => {
@@ -175,34 +252,53 @@ export default async function create(argv: yargs.Arguments<any>) {
     }
   };
 
-  await copyDir(TEMPLATE, folder);
+  await copyDir(COMMON_FILES, folder);
+
+  if (type === 'expo') {
+    await copyDir(EXPO_FILES, folder);
+  } else {
+    await copyDir(NATIVE_FILES, folder);
+
+    if (type === 'cpp') {
+      await copyDir(CPP_FILES, folder);
+    } else {
+      await copyDir(OBJC_FILES, folder);
+    }
+  }
 
   try {
-    await spawn.sync(
-      'git init && git add . && git commit -m "chore: initial commit"',
-      { cwd: folder }
-    );
+    spawn.sync('git', ['init'], { cwd: folder });
+    spawn.sync('git', ['add', '.'], { cwd: folder });
+    spawn.sync('git', ['commit', '-m', 'chore: initial commit'], {
+      cwd: folder,
+    });
   } catch (e) {
     // Ignore error
   }
 
+  const platforms = {
+    ios: { name: 'iOS', color: 'cyan' },
+    android: { name: 'Android', color: 'green' },
+    ...(type === 'expo' ? { web: { name: 'Web', color: 'blue' } } : null),
+  };
+
   console.log(
     dedent(chalk`
-      Project created successfully at {blue ${argv.name}}!
+      Project created successfully at {yellow ${argv.name}}!
 
       {magenta {bold Get started} with the project}{gray :}
 
         {gray $} yarn bootstrap
+      ${Object.entries(platforms)
+        .map(
+          ([script, { name, color }]) => chalk`
+      {${color} Run the example app on {bold ${name}}}{gray :}
 
-      {cyan Run the example app on {bold iOS}}{gray :}
+        {gray $} yarn example ${script}`
+        )
+        .join('\n')}
 
-        {gray $} yarn example ios
-
-      {green Run the example app on {bold Android}}{gray :}
-
-        {gray $} yarn example android
-
-      {blue Good luck!}
+      {yellow Good luck!}
     `)
   );
 }
